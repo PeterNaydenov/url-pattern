@@ -1,4 +1,4 @@
-import { urlPattern, UrlPattern, makePattern, match, stringify } from '../src/index.js';
+import { urlPattern, UrlPattern, makePattern, match, stringify } from '../src/main.js';
 
 describe('url-pattern', () => {
   describe('basic named segments', () => {

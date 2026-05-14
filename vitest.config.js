@@ -14,6 +14,6 @@ export default defineConfig({
     reporter: [ 'text', 'json', 'html', "lcov",
       "text-summary"],
     include: ['src/**/*.js'],
-    exclude: ['src/index.js'],
+    exclude: ['src/main.js'],
   },
 });
