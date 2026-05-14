@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./src/main.js",
   "module": "./dist/url-pattern.es.js",
-  "types": "./types/index.d.ts",
+  "types": "./types/main.d.ts",
   "files": [
     "dist",
     "types",
