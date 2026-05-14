@@ -1,9 +1,9 @@
 # URL Pattern (@peter.naydenov/url-pattern)
 
 [![version](https://img.shields.io/npm/v/@peter.naydenov/url-pattern.svg)](https://www.npmjs.com/package/@peter.naydenov/url-pattern)
-[![license](https://img.shields.io/github/license/PeterNaydenov/git-url-pattern.svg)](https://github.com/PeterNaydenov/git-url-pattern/blob/main/LICENSE)
-[![GitHub issues](https://img.shields.io/github/issues-raw/PeterNaydenov/git-url-pattern.svg)](https://github.com/PeterNaydenov/git-url-pattern/issues)
-[![GitHub top language](https://img.shields.io/github/languages/top/PeterNaydenov/git-url-pattern.svg)](https://github.com/PeterNaydenov/git-url-pattern)
+[![license](https://img.shields.io/github/license/PeterNaydenov/url-pattern.svg)](https://github.com/PeterNaydenov/url-pattern/blob/main/LICENSE)
+[![GitHub issues](https://img.shields.io/github/issues-raw/PeterNaydenov/url-pattern.svg)](https://github.com/PeterNaydenov/url-pattern/issues)
+[![GitHub top language](https://img.shields.io/github/languages/top/PeterNaydenov/url-pattern.svg)](https://github.com/PeterNaydenov/url-pattern)
 [![npm bundle size](https://img.shields.io/bundlejs/size/@peter.naydenov/url-pattern.svg)](https://www.npmjs.com/package/@peter.naydenov/url-pattern)
 
 Easier than regex string matching patterns for urls and other strings. Turn strings into data or data into strings.
