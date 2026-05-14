@@ -17,11 +17,6 @@ export default {
     {
       file: 'dist/url-pattern.umd.js',
       format: 'umd',
-      name: 'urlPattern'
-    },
-    {
-      file: 'dist/url-pattern.umd.min.js',
-      format: 'umd',
       name: 'urlPattern',
       plugins: [terser()]
     }

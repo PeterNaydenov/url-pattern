@@ -6,6 +6,7 @@
     "declaration": true,
     "declarationDir": "./types",
     "outDir": "./dist",
+    "emitDeclarationOnly": true,
     "rootDir": "./src",
     "strict": false,
     "noImplicitAny": false,
