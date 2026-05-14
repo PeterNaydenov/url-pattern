@@ -133,4 +133,8 @@ Returns an object with `regex` (compiled RegExp), `segments` (parsed segments ar
 
 '@peter.naydenov/url-pattern' was created and supported by [Peter Naydenov](https://github.com/PeterNaydenov).
 
+
+
+## License
+
 '@peter.naydenov/url-pattern' is released under the [MIT License](https://github.com/PeterNaydenov/git-url-pattern/blob/main/LICENSE).
