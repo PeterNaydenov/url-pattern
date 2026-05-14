@@ -1,0 +1,13 @@
+src/
+test/
+coverage/
+.fallow/
+.gitignore
+.git/
+*.md
+!README.md
+!Changelog.md
+vitest.config.js
+tsconfig.json
+tsconfig.build.json
+package-lock.json
