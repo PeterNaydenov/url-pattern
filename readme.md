@@ -89,6 +89,11 @@ const result = pattern.match ( '/user/john/post/123' )
 console.log ( result )
 // Output: { username: 'john', postId: '123' }
 ```
+## URL Patterns
+
+See [supported URL pattern types with examples](./PATTERNS.md).
+
+
 
 ## API Reference
 
@@ -124,10 +129,14 @@ Generates a URL string from provided data object.
 
 Returns an object with `regex` (compiled RegExp), `segments` (parsed segments array), and `segmentNames` (segment name mappings).
 
-## Links
 
+
+## Links
+- [Supported URL patterns with examples](./PATTERNS.md).
 - [History of changes](CHANGELOG.md)
 - [TypeScript definitions](types/index.d.ts)
+
+
 
 ## Credits
 
