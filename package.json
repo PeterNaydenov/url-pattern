@@ -45,7 +45,7 @@
     "url": "https://github.com/PeterNaydenov/url-pattern"
   },
   "devDependencies": {
-    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-terser": "^1.0.0",
     "@vitest/coverage-v8": "^4.1.6",
     "eslint": "^10.3.0",
     "rollup": "^4.9.6",
