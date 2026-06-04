@@ -51,5 +51,8 @@
     "rollup": "^4.60.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.6"
+  },
+  "allowScripts": {
+    "fsevents@2.3.3": true
   }
 }
