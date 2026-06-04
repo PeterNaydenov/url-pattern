@@ -1,6 +1,10 @@
 ## Release History
 
 
+### 1.0.2 (2026-06-04)
+- [x] Moving from eslint to oxidize;
+
+
 
 ### 1.0.1 (2026-05-14)
 - [x] Fixed type definitions output path;
