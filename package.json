@@ -28,7 +28,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "cover": "vitest run --coverage",
-    "lint": "eslint src --ext .js",
+    "lint": "oxlint src",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -47,7 +47,7 @@
   "devDependencies": {
     "@rollup/plugin-terser": "^1.0.0",
     "@vitest/coverage-v8": "^4.1.7",
-    "eslint": "^10.4.1",
+    "oxlint": "^1.68.0",
     "rollup": "^4.61.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"

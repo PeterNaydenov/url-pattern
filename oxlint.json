@@ -1,0 +1,17 @@
+{
+  "rules": {
+    "no-unused-vars": "warn",
+    "no-console": "off",
+    "no-control-regex": "off",
+    "no-const-assign": "error",
+    "no-debugger": "error",
+    "no-dupe-class-members": "error",
+    "no-empty": "error",
+    "no-invalid-regexp": "error",
+    "no-undef": "error",
+    "no-unexpected-multiline": "error",
+    "no-unreachable": "error",
+    "require-return-for-string-output": "error",
+    "valid-typeof": "error"
+  }
+}
