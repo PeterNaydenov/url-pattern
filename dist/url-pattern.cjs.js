@@ -214,7 +214,7 @@ const parsePattern = (pattern, options) => {
  * @param {UrlPatternOptions} options - Options
  * @returns {{regex: string, segmentNames: Array<SegmentName>}} Compiled regex and segment names
  */
-const compileRegex = (segments, options) => {
+const compileRegex = (segments, _options) => {
   let regex = '^';
   let groupIndex = 0;
   /** @type {Array<SegmentName>} */
