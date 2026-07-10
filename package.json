@@ -4,7 +4,7 @@
   "description": "Matching patterns for urls and other strings. Turn strings into data or data into strings.",
   "type": "module",
   "main": "./src/main.js",
-  "module": "./dist/url-pattern.es.js",
+  "module": "./src/main.js",
   "types": "./types/main.d.ts",
   "files": [
     "dist",
@@ -13,9 +13,9 @@
   ],
   "exports": {
     ".": {
-      "import": "./dist/url-pattern.es.js",
-      "require": "./dist/url-pattern.cjs.js",
-      "default": "./dist/url-pattern.es.js"
+      "import": "./src/main.js",
+      "require": "./dist/url-pattern.cjs",
+      "default": "./src/main.js"
     },
     "./package.json": "./package.json",
     "./src/*": "./src/*",
