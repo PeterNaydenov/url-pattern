@@ -89,12 +89,15 @@ Mix `:name`, `(...)`, and `*` together. Useful for versioned APIs.
 
 ### Escaped Characters
 
-Prefix special characters (`:`, `(`, `)`, `*`) with `\` to match them literally.
+The escape character (`\`) only escapes **regex metacharacters** — `^`, `$`, `.`, `*`, `+`, `?`, `(`, `)`, `[`, `]`, `{`, `}`, `|`, and `\` itself. For any other character (including `:`), the backslash is kept as a literal character and the following character is processed normally.
+
+This means `:` cannot be escaped (it has no special meaning in regex), and you can use `\*`, `\(`, `\)`, `\.`, etc. to match those characters literally. The same applies to `*` — escape it to match a literal asterisk instead of a wildcard.
 
 | Pattern | Example URL | Result |
 |---------|-------------|--------|
-| `/v\:major` | `/v:major` | `{}` |
-| `/api/\:version` | `/api/:version` | `{}` |
+| `/\*literal` | `/*literal` | `{}` |
+| `/\(group\)` | `/(group)` | `{}` |
+| `/\.json` | `/.json` | `{}` |
 
 
 
