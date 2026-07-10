@@ -1,4 +1,4 @@
-export default UrlPattern;
+export default urlPattern;
 export type UrlPatternOptions = {
     /**
      * - Character used for escaping special characters
@@ -8,6 +8,10 @@ export type UrlPatternOptions = {
      * - Character that starts a named segment
      */
     segmentNameStartChar?: string;
+    /**
+     * - Character that ends a named segment. When set, the segment name stops at the first occurrence of this character (instead of stopping at the first character outside `segmentNameCharset`).
+     */
+    segmentNameEndChar?: string;
     /**
      * - Characters allowed in segment names
      */
@@ -42,6 +46,10 @@ export type ParsedSegment = {
      * - Whether the segment is optional
      */
     optional?: boolean;
+    /**
+     * - Identifier of the optional group this segment belongs to; absent for required segments
+     */
+    optionalGroupId?: number;
     /**
      * - Compiled regex string
      */
@@ -163,7 +171,8 @@ export function stringify(compiled: CompiledPattern, values?: any): string;
  * @typedef {Object} UrlPatternOptions
  * @property {string} [escapeChar='\\'] - Character used for escaping special characters
  * @property {string} [segmentNameStartChar=':'] - Character that starts a named segment
- * @property {string} [segmentNameCharset='a-zA-Z0-9'] - Characters allowed in segment names
+ * @property {string} [segmentNameEndChar] - Character that ends a named segment. When set, the segment name stops at the first occurrence of this character (instead of stopping at the first character outside `segmentNameCharset`).
+ * @property {string} [segmentNameCharset='a-zA-Z0-9_'] - Characters allowed in segment names
  * @property {string} [segmentValueCharset='a-zA-Z0-9-_~ %'] - Characters allowed in segment values
  * @property {string} [optionalSegmentStartChar='('] - Character that starts an optional segment
  * @property {string} [optionalSegmentEndChar=')'] - Character that ends an optional segment
@@ -174,6 +183,7 @@ export function stringify(compiled: CompiledPattern, values?: any): string;
  * @property {string} name - Segment name
  * @property {string} type - Segment type ('named' | 'wildcard' | 'literal')
  * @property {boolean} [optional=false] - Whether the segment is optional
+ * @property {number} [optionalGroupId] - Identifier of the optional group this segment belongs to; absent for required segments
  * @property {string} regex - Compiled regex string
  */
 /**
