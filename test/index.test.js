@@ -437,9 +437,13 @@ describe('url-pattern', () => {
       expect(pattern.match('/foo.json')).toEqual({ id: 'foo' });
     });
 
-    test('escaped colon not followed by a name char throws at parse time', () => {
-      // '/:a\:b' — '\' is literal, but ':b' has no valid name after it.
-      expect(() => urlPattern('/:a\\:b')).toThrow(/segment name/i);
+    test('backslash before a non-regex-metachar becomes a literal backslash', () => {
+      // '\' is a regex metachar, so '\:' tries to escape ':'. ':' is NOT a
+      // regex metachar (it has no special meaning in regex), so the escape
+      // is dropped and '\' is pushed as a literal character, then ':b'
+      // parses normally as a second named segment.
+      const pattern = urlPattern('/:a\\:b');
+      expect(pattern.match('/x\\y')).toEqual({ a: 'x', b: 'y' });
     });
   });
 
@@ -480,6 +484,175 @@ describe('url-pattern', () => {
       expect(pattern.match('/api/x')).toEqual({ a: ['x'] });
       expect(pattern.match('/api/x/y')).toEqual({ a: ['x', 'y'] });
       expect(pattern.match('/api')).toEqual({});
+    });
+  });
+
+  // ----------------------------------------------------------------------
+  // Quality-of-life follow-ups.
+  // ----------------------------------------------------------------------
+
+  describe('wildcardName option', () => {
+    test('match stores wildcard value under the custom key', () => {
+      const pattern = urlPattern('/api/:id/files/*', { wildcardName: 'rest' });
+      expect(pattern.match('/api/42/files/a/b')).toEqual({ id: '42', rest: 'a/b' });
+    });
+
+    test('stringify reads wildcard value from the custom key', () => {
+      const pattern = urlPattern('/api/:id/files/*', { wildcardName: 'rest' });
+      expect(pattern.stringify({ id: '42', rest: 'a/b' })).toBe('/api/42/files/a/b');
+    });
+
+    test('custom wildcard name avoids collision with a named `_` segment', () => {
+      const pattern = urlPattern('/api/:_/files/*', { wildcardName: 'rest' });
+      // Without the option, both `:_` and `*` would land on key `_` and merge
+      // into an array. With the option, they live on separate keys.
+      expect(pattern.match('/api/jane/files/a/b')).toEqual({
+        _: 'jane',
+        rest: 'a/b'
+      });
+    });
+
+    test('wildcard key change applies to optional groups too', () => {
+      const pattern = urlPattern('/files(/*)', { wildcardName: 'rest' });
+      expect(pattern.match('/files/images/photo.jpg')).toEqual({ rest: 'images/photo.jpg' });
+      // Empty wildcard is a valid match result (mirrors the default-key
+      // behaviour tested in `bug fix 12`).
+      expect(pattern.match('/files/')).toEqual({ rest: '' });
+    });
+
+    test('custom wildcard name used in stringify error message', () => {
+      const pattern = urlPattern('/api/*', { wildcardName: 'rest' });
+      expect(() => pattern.stringify({})).toThrow('Missing required wildcard value');
+    });
+  });
+
+  describe('escapeChar option', () => {
+    test('custom escape char is honoured', () => {
+      const pattern = urlPattern('/files/%*', { escapeChar: '%' });
+      // '%*' escapes the wildcard char so a literal `*` is matched.
+      expect(pattern.match('/files/*')).toEqual({});
+    });
+
+    test('default escape char still works (regression)', () => {
+      const pattern = urlPattern('/files/\\*');
+      expect(pattern.match('/files/*')).toEqual({});
+    });
+  });
+
+  describe('wildcard empty string in stringify', () => {
+    test('stringify of required wildcard with empty string is allowed', () => {
+      const pattern = urlPattern('/files/*');
+      expect(pattern.stringify({ _: '' })).toBe('/files/');
+    });
+
+    test('stringify of optional wildcard with empty string is still allowed', () => {
+      const pattern = urlPattern('/files(/*)');
+      // Empty string is considered "absent" by isAbsentValue, so the
+      // optional group is wiped — that's the documented behaviour.
+      expect(pattern.stringify({ _: '' })).toBe('/files');
+    });
+  });
+
+  describe('pattern.compiled shape', () => {
+    test('exposes the documented fields for a string pattern', () => {
+      const pattern = urlPattern('/api/:id');
+      expect(pattern.compiled).toBeDefined();
+      expect(typeof pattern.compiled.regex).toBe('string');
+      expect(pattern.compiled.regexObj).toBeInstanceOf(RegExp);
+      expect(Array.isArray(pattern.compiled.segments)).toBe(true);
+      expect(Array.isArray(pattern.compiled.segmentNames)).toBe(true);
+      expect(pattern.compiled.options).toBeDefined();
+      expect(pattern.compiled.isRegex).toBe(false);
+      expect(pattern.compiled.pattern).toBe('/api/:id');
+    });
+
+    test('exposes the documented fields for a regex pattern', () => {
+      const pattern = new UrlPattern(/^\/api\/(\d+)$/, ['id']);
+      expect(pattern.compiled.isRegex).toBe(true);
+      expect(Array.isArray(pattern.compiled.keys)).toBe(true);
+      expect(pattern.compiled.keys).toEqual(['id']);
+    });
+
+    test('compiled object is frozen (mutating throws in strict mode)', () => {
+      'use strict';
+      const pattern = urlPattern('/api/:id');
+      expect(Object.isFrozen(pattern.compiled)).toBe(true);
+      expect(() => {
+        pattern.compiled.regex = 'mutated';
+      }).toThrow();
+    });
+  });
+
+  describe('class API with regex and keys', () => {
+    test('new UrlPattern accepts regex with keys array', () => {
+      const pattern = new UrlPattern(/^\/api\/([^\/]+)$/, ['resource']);
+      expect(pattern.match('/api/users')).toEqual({ resource: 'users' });
+      expect(pattern.match('/api/users/extra')).toBeNull();
+    });
+  });
+
+  // ----------------------------------------------------------------------
+  // Edge-case hardening.
+  // ----------------------------------------------------------------------
+
+  describe('regex flag handling', () => {
+    test('g flag in user regex does not leak lastIndex between matches', () => {
+      // Before the fix, the second call returned null because exec() advanced
+      // lastIndex past the input. Now the g flag is stripped on compile.
+      const pattern = urlPattern(/foo (\d+)/g, ['num']);
+      expect(pattern.match('foo 1')).toEqual({ num: '1' });
+      expect(pattern.match('foo 2')).toEqual({ num: '2' });
+      expect(pattern.match('foo 3')).toEqual({ num: '3' });
+    });
+
+    test('y (sticky) flag in user regex is stripped', () => {
+      // y requires a match at lastIndex — incompatible with our anchored use.
+      const pattern = urlPattern(/foo (\d+)/y, ['num']);
+      expect(pattern.match('foo 1')).toEqual({ num: '1' });
+      expect(pattern.match('foo 1')).toEqual({ num: '1' });
+    });
+
+    test('i flag is preserved', () => {
+      const pattern = urlPattern(/FOO/i);
+      expect(pattern.match('foo')).not.toBeNull();
+      expect(pattern.match('FOO')).not.toBeNull();
+    });
+
+    test('original regex object is left untouched (flags not mutated)', () => {
+      const original = /foo/g;
+      urlPattern(original, []);
+      expect(original.flags).toBe('g');
+    });
+  });
+
+  describe('match() input validation', () => {
+    test('throws TypeError on non-string input', () => {
+      const pattern = urlPattern('/api/:id');
+      expect(() => pattern.match(123)).toThrow(TypeError);
+      expect(() => pattern.match(null)).toThrow(TypeError);
+      expect(() => pattern.match(undefined)).toThrow(TypeError);
+      expect(() => pattern.match({})).toThrow(TypeError);
+      expect(() => pattern.match([])).toThrow(TypeError);
+    });
+
+    test('error message mentions the actual type received', () => {
+      const pattern = urlPattern('/api/:id');
+      expect(() => pattern.match(123)).toThrow(/string/);
+    });
+  });
+
+  describe('deep-freeze of compiled.options', () => {
+    test('compiled.options is frozen', () => {
+      const pattern = urlPattern('/api/:id');
+      expect(Object.isFrozen(pattern.compiled.options)).toBe(true);
+    });
+
+    test('mutating compiled.options throws in strict mode', () => {
+      'use strict';
+      const pattern = urlPattern('/api/:id');
+      expect(() => {
+        pattern.compiled.options.escapeChar = '%';
+      }).toThrow();
     });
   });
 });
