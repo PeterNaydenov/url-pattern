@@ -106,20 +106,21 @@ Creates a new pattern instance.
 
 #### Options
 
-- **escapeChar** `{string}` - Character used for escaping special characters (default: `'\\'`)
+- **escapeChar** `{string}` - Character used for escaping (default: `'\\'`). Only escapes regex metacharacters (`^$.*+?()[]{}|\`); the backslash is kept literal for any other following character.
 - **segmentNameStartChar** `{string}` - Character that starts a named segment (default: `':'`)
 - **segmentNameEndChar** `{string}` - Character that ends a named segment (default: `undefined`). When set, the segment name stops at the first occurrence of this character instead of at the first character outside `segmentNameCharset`.
 - **segmentNameCharset** `{string}` - Characters allowed in segment names (default: `'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_'`). Treated as a list of explicit characters; range notation is not interpreted.
 - **segmentValueCharset** `{string}` - Characters allowed in segment values (default: `'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_~ %'`). Treated as a list of explicit characters; range notation is not interpreted.
 - **optionalSegmentStartChar** `{string}` - Character that starts an optional segment (default: `'('`)
 - **optionalSegmentEndChar** `{string}` - Character that ends an optional segment (default: `')'`)
-- **wildcardChar** `{string}` - Character that denotes a wildcard (default: `'*'`)
+- **wildcardChar** `{string}` - Character that denotes a wildcard in the pattern (default: `'*'`)
+- **wildcardName** `{string}` - Key under which the wildcard value is stored in the match result (default: `'_'`). Change this to avoid colliding with a named segment that also uses `_`, or to give wildcards a more descriptive key.
 
 ### Pattern Methods
 
 #### `pattern.match(string)`
 
-Matches a string against the pattern and returns an object with captured values, or `null` if no match.
+Matches a string against the pattern and returns an object with captured values, or `null` if no match. Throws a `TypeError` if the argument is not a string.
 
 #### `pattern.stringify(data)`
 
@@ -127,14 +128,29 @@ Generates a URL string from provided data object.
 
 #### `pattern.compiled`
 
-Read-only object exposing the internal compiled state: `regex` (regex source), `regexObj` (compiled `RegExp`), `segments` (parsed segments array), `segmentNames` (segment name → capture-group mappings), `options` (merged options), `isRegex` (whether the pattern was created from a regex), and `pattern` (the original pattern string). Useful for introspection; do not mutate.
+Read-only object exposing the internal compiled state: `regex` (regex source), `regexObj` (compiled `RegExp`), `segments` (parsed segments array), `segmentNames` (segment name → capture-group mappings), `options` (merged options), `isRegex` (whether the pattern was created from a regex), and `pattern` (the original pattern string). The object is frozen — any attempt to mutate it will throw in strict mode (or fail silently elsewhere). Useful for introspection; do not mutate.
+
+## Notes
+
+### Wildcard result key
+
+Wildcards are stored under the key `_` by default. If a pattern has both a wildcard and a named segment that resolves to `_` (e.g. `/api/:_/files/*`), both values end up under the same key — the second one is appended, producing an array. To avoid this, configure the wildcard key with the `wildcardName` option:
+
+```js
+const pattern = urlPattern('/api/:id/files/*', { wildcardName: 'rest' })
+pattern.match('/api/42/files/a/b')   // → { id: '42', rest: 'a/b' }
+```
+
+### Regex patterns
+
+When you pass a `RegExp` to `urlPattern`, the `g` and `y` flags are stripped. They are incompatible with this library's anchored, single-match contract: `g` would make `exec` advance `lastIndex` between calls (so the second `match()` would return `null`); `y` (sticky) requires a match starting exactly at `lastIndex`. Other flags (`i`, `m`, `s`, `d`, `u`) are preserved. The original regex object you passed in is not mutated — the library creates a fresh `RegExp` internally.
 
 
 
 ## Links
 - [Supported URL patterns with examples](./PATTERNS.md).
 - [History of changes](CHANGELOG.md)
-- [TypeScript definitions](types/index.d.ts)
+- [TypeScript definitions](types/main.d.ts)
 
 
 
