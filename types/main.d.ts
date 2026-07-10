@@ -4,7 +4,7 @@
  */
 export type UrlPatternOptions = {
     /**
-     * - Character used for escaping special characters
+     * - Character used for escaping. Only escapes regex metacharacters (`^$.*+?()[]{}|\`); for any other character the backslash is treated as a literal.
      */
     escapeChar?: string;
     /**
@@ -32,9 +32,13 @@ export type UrlPatternOptions = {
      */
     optionalSegmentEndChar?: string;
     /**
-     * - Character that denotes a wildcard
+     * - Character that denotes a wildcard in the pattern
      */
     wildcardChar?: string;
+    /**
+     * - Key under which the wildcard value is stored in the match result
+     */
+    wildcardName?: string;
 };
 export type ParsedSegment = {
     /**
@@ -108,14 +112,15 @@ export type CompiledPattern = {
 };
 /**
  * @typedef {Object} UrlPatternOptions
- * @property {string} [escapeChar='\\'] - Character used for escaping special characters
+ * @property {string} [escapeChar='\\'] - Character used for escaping. Only escapes regex metacharacters (`^$.*+?()[]{}|\`); for any other character the backslash is treated as a literal.
  * @property {string} [segmentNameStartChar=':'] - Character that starts a named segment
  * @property {string} [segmentNameEndChar] - Character that ends a named segment. When set, the segment name stops at the first occurrence of this character (instead of stopping at the first character outside `segmentNameCharset`).
  * @property {string} [segmentNameCharset='a-zA-Z0-9_'] - Characters allowed in segment names
  * @property {string} [segmentValueCharset='a-zA-Z0-9-_~ %'] - Characters allowed in segment values
  * @property {string} [optionalSegmentStartChar='('] - Character that starts an optional segment
  * @property {string} [optionalSegmentEndChar=')'] - Character that ends an optional segment
- * @property {string} [wildcardChar='*'] - Character that denotes a wildcard
+ * @property {string} [wildcardChar='*'] - Character that denotes a wildcard in the pattern
+ * @property {string} [wildcardName='_'] - Key under which the wildcard value is stored in the match result
  */
 /**
  * @typedef {Object} ParsedSegment
