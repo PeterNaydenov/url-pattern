@@ -18,7 +18,7 @@ Static path parts that match exactly as written. No special characters, no varia
 
 ### Named Segments
 
-Capture dynamic path segments using the `:name` syntax. Values must match the character set `a-zA-Z0-9-_~ %`.
+Capture dynamic path segments using the `:name` syntax. Values must match the character set `a-zA-Z0-9-_~ %` (use the expanded form in your config if you customize the charset).
 
 | Pattern | Example URL | Result |
 |---------|-------------|--------|
