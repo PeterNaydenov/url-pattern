@@ -1,6 +1,6 @@
 {
   "name": "@peter.naydenov/url-pattern",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Matching patterns for urls and other strings. Turn strings into data or data into strings.",
   "type": "module",
   "main": "./src/main.js",
