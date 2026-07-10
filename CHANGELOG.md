@@ -1,6 +1,13 @@
 ## Release History
 
 
+
+### 1.0.5 (2026-07-10)
+- [x] **🔴 CJS dist file rename: `url-pattern.cjs.js` → `url-pattern.cjs`**. The previous filename ended in `.js`, so Node tried to load it as an ES module (because the package's `package.json` has `"type": "module"`), but the file used CommonJS syntax (`exports`, `module.exports`). The result was a silent failure: `require('@peter.naydenov/url-pattern')` returned an empty object and `new UrlPattern(path)` threw `TypeError: UrlPattern is not a constructor`. The new `.cjs` extension forces Node to treat it as CJS regardless of the package's `type` field;
+- [x] **Source is now the primary entry point**. `package.json` `main`, `module`, `exports[import]`, and `exports[default]` all point to `./src/main.js` — ESM consumers and bundlers (Vite, webpack, Rollup, esbuild) get the source directly, no transpilation in between. CJS consumers still get the pre-built `dist/url-pattern.cjs`. The `dist/` directory is preserved for the UMD browser bundle and the CJS Node bundle;
+
+
+
 ### 1.0.4 (2026-07-10)
 - [x] Added `wildcardName` option (default `'_'`) so the wildcard result key can be renamed and no longer silently collides with a named segment that also uses `_`;
 - [x] `pattern.compiled` and `pattern.compiled.options` are now frozen — accidental mutation of either the top-level state or the nested options throws in strict mode instead of silently desynchronising the cached regex;
