@@ -1,6 +1,19 @@
 ## Release History
 
 
+### 1.0.4 (2026-07-10)
+- [x] Added `wildcardName` option (default `'_'`) so the wildcard result key can be renamed and no longer silently collides with a named segment that also uses `_`;
+- [x] `pattern.compiled` and `pattern.compiled.options` are now frozen — accidental mutation of either the top-level state or the nested options throws in strict mode instead of silently desynchronising the cached regex;
+- [x] `g` and `y` flags are now stripped from user-provided regexes when constructing a pattern — they were incompatible with the anchored, single-match contract and made subsequent `match()` calls return `null` because `exec` advanced `lastIndex`. Other flags (`i`, `m`, `s`, `d`, `u`) are preserved and the original regex object is left untouched;
+- [x] `pattern.match()` now throws a `TypeError` on non-string input (number, `null`, `undefined`, object, array) instead of silently coercing with `String()`;
+- [x] Fixed the escape handler's LITERAL branch — it was missing a `continue` and could fall through with stale state, throwing "no segment name" on valid input such as `/:a\:b`;
+- [x] `isAbsentValue` now treats `NaN` as missing, so a stray numeric `NaN` value is omitted from optional groups instead of being stringified to the literal `"NaN"` in a generated URL;
+- [x] `PATTERNS.md` escape section rewritten to match actual behaviour (`\` only escapes regex metacharacters — `:` cannot be escaped, use `\*`, `\(`, `\)`, `\.` for literal matches);
+- [x] README "TypeScript definitions" link fixed (pointed to the non-existent `types/index.d.ts` — now points to `types/main.d.ts`);
+- [x] README "Notes" section added documenting the wildcard-key collision, how `wildcardName` resolves it, and how `g`/`y` regex flags are handled;
+- [x] `types/main.d.ts` tightened: `ParsedSegment.type` and `SegmentName.type` are now literal unions (`'named' | 'wildcard' | 'literal'`) instead of `string`;
+
+
 ### 1.0.3 (2026-07-10)
 - [x] Default export is now the factory `urlPattern` function, so `import urlPattern from '@peter.naydenov/url-pattern'` and `require('@peter.naydenov/url-pattern')` work without `new`;
 - [x] Implemented `segmentNameEndChar` option so the README example with `{name}` segment syntax parses correctly;
