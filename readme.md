@@ -59,7 +59,7 @@ const pattern = urlPattern ( '/files/*' )
 const result = pattern.match ( '/files/images/photo.jpg' )
 
 console.log ( result )
-// Output: { '*': 'images/photo.jpg' }
+// Output: { _: 'images/photo.jpg' }
 ```
 
 ### Generate URL from data
@@ -108,9 +108,9 @@ Creates a new pattern instance.
 
 - **escapeChar** `{string}` - Character used for escaping special characters (default: `'\\'`)
 - **segmentNameStartChar** `{string}` - Character that starts a named segment (default: `':'`)
-- **segmentNameEndChar** `{string}` - Character that ends a named segment (default: `undefined`)
-- **segmentNameCharset** `{string}` - Characters allowed in segment names (default: `'a-zA-Z0-9'`)
-- **segmentValueCharset** `{string}` - Characters allowed in segment values (default: `'a-zA-Z0-9-_~ %'`)
+- **segmentNameEndChar** `{string}` - Character that ends a named segment (default: `undefined`). When set, the segment name stops at the first occurrence of this character instead of at the first character outside `segmentNameCharset`.
+- **segmentNameCharset** `{string}` - Characters allowed in segment names (default: `'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_'`). Treated as a list of explicit characters; range notation is not interpreted.
+- **segmentValueCharset** `{string}` - Characters allowed in segment values (default: `'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_~ %'`). Treated as a list of explicit characters; range notation is not interpreted.
 - **optionalSegmentStartChar** `{string}` - Character that starts an optional segment (default: `'('`)
 - **optionalSegmentEndChar** `{string}` - Character that ends an optional segment (default: `')'`)
 - **wildcardChar** `{string}` - Character that denotes a wildcard (default: `'*'`)
@@ -125,9 +125,9 @@ Matches a string against the pattern and returns an object with captured values,
 
 Generates a URL string from provided data object.
 
-#### `pattern.compile()`
+#### `pattern.compiled`
 
-Returns an object with `regex` (compiled RegExp), `segments` (parsed segments array), and `segmentNames` (segment name mappings).
+Read-only object exposing the internal compiled state: `regex` (regex source), `regexObj` (compiled `RegExp`), `segments` (parsed segments array), `segmentNames` (segment name → capture-group mappings), `options` (merged options), `isRegex` (whether the pattern was created from a regex), and `pattern` (the original pattern string). Useful for introspection; do not mutate.
 
 
 
