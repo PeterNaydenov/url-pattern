@@ -11,7 +11,8 @@ Object.defineProperty(exports, '__esModule', { value: true });
  * @typedef {Object} UrlPatternOptions
  * @property {string} [escapeChar='\\'] - Character used for escaping special characters
  * @property {string} [segmentNameStartChar=':'] - Character that starts a named segment
- * @property {string} [segmentNameCharset='a-zA-Z0-9'] - Characters allowed in segment names
+ * @property {string} [segmentNameEndChar] - Character that ends a named segment. When set, the segment name stops at the first occurrence of this character (instead of stopping at the first character outside `segmentNameCharset`).
+ * @property {string} [segmentNameCharset='a-zA-Z0-9_'] - Characters allowed in segment names
  * @property {string} [segmentValueCharset='a-zA-Z0-9-_~ %'] - Characters allowed in segment values
  * @property {string} [optionalSegmentStartChar='('] - Character that starts an optional segment
  * @property {string} [optionalSegmentEndChar=')'] - Character that ends an optional segment
@@ -23,6 +24,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
  * @property {string} name - Segment name
  * @property {string} type - Segment type ('named' | 'wildcard' | 'literal')
  * @property {boolean} [optional=false] - Whether the segment is optional
+ * @property {number} [optionalGroupId] - Identifier of the optional group this segment belongs to; absent for required segments
  * @property {string} regex - Compiled regex string
  */
 
@@ -52,7 +54,8 @@ Object.defineProperty(exports, '__esModule', { value: true });
 const DEFAULT_OPTIONS = {
   escapeChar: '\\',
   segmentNameStartChar: ':',
-  segmentNameCharset: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+  segmentNameEndChar: undefined,
+  segmentNameCharset: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_',
   segmentValueCharset: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_~ %',
   optionalSegmentStartChar: '(',
   optionalSegmentEndChar: ')',
@@ -65,6 +68,26 @@ const DEFAULT_OPTIONS = {
  * @returns {string} Escaped string
  */
 const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Builds a safe regex character class body from a charset string.
+ *
+ * The charset is treated as a list of explicit characters — range notation
+ * (`a-z`) is NOT interpreted as a range. To match the same set of chars
+ * with range syntax, expand it (e.g. `a-z` → `abcdefghijklmnopqrstuvwxyz`).
+ *
+ * The following chars are escaped because they are special inside `[...]`:
+ * `\`, `]`, `^`, and `-`.
+ * @param {string} charset - Character class body
+ * @returns {string} Safe char class body
+ */
+const escapeCharClass = (charset) => {
+  let escaped = charset.replace(/\\/g, '\\\\');
+  escaped = escaped.replace(/\]/g, '\\]');
+  escaped = escaped.replace(/\^/g, '\\^');
+  escaped = escaped.replace(/-/g, '\\-');
+  return escaped;
+};
 
 /**
  * Merges default options with user provided options
@@ -116,29 +139,62 @@ const parsePattern = (pattern, options) => {
   const segments = [];
   let i = 0;
   let inOptional = false;
+  let optionalGroupId = 0;
+  let parenDepth = 0;
 
   while (i < pattern.length) {
     const char = pattern[i];
 
-    if (char === options.escapeChar && i + 1 < pattern.length) {
-      segments.push({
-        type: 'literal',
-        name: pattern[i + 1],
-        regex: escapeRegex(pattern[i + 1]),
-        optional: inOptional
-      });
-      i += 2;
-      continue;
+    if (char === options.escapeChar) {
+      // Throw when the escape char is at the end of the pattern — nothing follows
+      // it to escape, and the resulting regex would be broken.
+      if (i + 1 >= pattern.length) {
+        throw new Error(`Invalid pattern: '\\' at position ${i} has nothing to escape`);
+      }
+      const nextChar = pattern[i + 1];
+      // Only treat \ as an escape when followed by a regex metacharacter.
+      // For all other characters the backslash is literal (e.g. '\)' in a URL
+      // is just a backslash followed by ')'). This prevents the escape handler
+      // from accidentally consuming the optional-group close delimiter ')'.
+      const regexMetachars = '^$\.*+?()[]{}|\\';
+      if (!regexMetachars.includes(nextChar)) {
+        // Not a regex metachar: treat the backslash as a literal character,
+        // advance past it so the next character is processed normally.
+        segments.push({
+          type: 'literal',
+          name: '\\',
+          regex: '\\\\',
+          optional: inOptional,
+          optionalGroupId: inOptional ? optionalGroupId : undefined
+        });
+        i += 1;
+      } else {
+        segments.push({
+          type: 'literal',
+          name: nextChar,
+          regex: escapeRegex(nextChar),
+          optional: inOptional,
+          optionalGroupId: inOptional ? optionalGroupId : undefined
+        });
+        i += 2;
+        continue;
+      }
     }
 
     if (char === options.optionalSegmentStartChar) {
       inOptional = true;
+      optionalGroupId++;
+      parenDepth++;
       i++;
       continue;
     }
 
     if (char === options.optionalSegmentEndChar) {
+      if (parenDepth === 0) {
+        throw new Error(`Invalid pattern: unmatched '${char}' at position ${i}`);
+      }
       inOptional = false;
+      parenDepth--;
       i++;
       continue;
     }
@@ -148,7 +204,8 @@ const parsePattern = (pattern, options) => {
         type: 'wildcard',
         name: '_',
         regex: '.*',
-        optional: inOptional
+        optional: inOptional,
+        optionalGroupId: inOptional ? optionalGroupId : undefined
       });
       i++;
       continue;
@@ -158,8 +215,12 @@ const parsePattern = (pattern, options) => {
       const remaining = pattern.slice(i + 1);
       let nameEnd = 0;
       const charset = options.segmentNameCharset || '';
-      
+      const endChar = options.segmentNameEndChar;
+
       for (let j = 0; j < remaining.length; j++) {
+        if (endChar && remaining[j] === endChar) {
+          break;
+        }
         if (!charset.includes(remaining[j])) {
           break;
         }
@@ -167,45 +228,66 @@ const parsePattern = (pattern, options) => {
       }
       
       const name = remaining.slice(0, nameEnd);
-      
+      const consumeEndChar = !!(endChar && remaining[nameEnd] === endChar);
+
       if (name.length > 0) {
-        let valueCharset = options.segmentValueCharset || '';
-        if (valueCharset.includes('-') && valueCharset.indexOf('-') > 0 && valueCharset.indexOf('-') < valueCharset.length - 1) {
-          valueCharset = valueCharset.replace(/-/g, '');
-          valueCharset += '-';
-        }
-        const escapedValueCharset = valueCharset.replace(/\]/g, '\\]');
+        const valueCharset = options.segmentValueCharset || '';
+        const escapedValueCharset = escapeCharClass(valueCharset);
         const valueRegex = `([${escapedValueCharset}]+)`;
-        
+
         segments.push({
           type: 'named',
           name,
           regex: valueRegex,
-          optional: inOptional
+          optional: inOptional,
+          optionalGroupId: inOptional ? optionalGroupId : undefined
         });
-        i += 1 + nameEnd;
+        i += 1 + nameEnd + (consumeEndChar ? 1 : 0);
         continue;
       }
+
+      // segmentNameStartChar at end of pattern, or followed by a non-charset
+      // character that is also a special char (e.g. ':)').
+      throw new Error(`Invalid pattern: '${char}' at position ${i} has no segment name`);
     }
 
     const literalEnd = findNextSpecialChar(pattern, i, options);
-    
+
     if (literalEnd > i) {
       const literal = pattern.slice(i, literalEnd);
       segments.push({
         type: 'literal',
         name: literal,
         regex: escapeRegex(literal),
-        optional: inOptional
+        optional: inOptional,
+        optionalGroupId: inOptional ? optionalGroupId : undefined
       });
       i = literalEnd;
       continue;
     }
 
-    i++;
+    // literalEnd === i: current char itself is a special char with no
+    // name/value following. Throw for clarity.
+    throw new Error(`Invalid pattern: '${char}' at position ${i} has no segment name`);
+  }
+
+  if (parenDepth !== 0) {
+    throw new Error(`Invalid pattern: unclosed '${options.optionalSegmentStartChar}'`);
   }
 
   return segments;
+};
+
+/**
+/**
+ * Returns true when a value should be treated as "absent" for an optional segment.
+ * @param {*} val - Value to inspect
+ * @returns {boolean}
+ */
+const isAbsentValue = (val) => {
+  if (val === undefined || val === null || val === '') return true;
+  if (Array.isArray(val) && val.length === 0) return true;
+  return false;
 };
 
 /**
@@ -227,8 +309,9 @@ const compileRegex = (segments, _options) => {
     if (segment.optional) {
       let optionalPart = '';
       let j = i;
-      
-      while (j < segments.length && segments[j].optional) {
+      const currentGroupId = segment.optionalGroupId;
+
+      while (j < segments.length && segments[j].optional && segments[j].optionalGroupId === currentGroupId) {
         const seg = segments[j];
         
         if (seg.type === 'wildcard') {
@@ -329,7 +412,11 @@ const match = (compiled, str) => {
       const result = {};
       compiled.keys.forEach((key, index) => {
         const val = matchResult[index + 1];
-        result[key] = val !== undefined ? val : null;
+        // Undefined means the optional group didn't participate — omit the key
+        // so this is consistent with string-pattern behaviour.
+        if (val !== undefined) {
+          result[key] = val;
+        }
       });
       return result;
     }
@@ -339,10 +426,22 @@ const match = (compiled, str) => {
   const result = {};
   const usedNames = new Set();
 
+  // Track which segment names are wildcards so their empty-string captures survive
+  // the cleanup loop. An empty wildcard result (e.g. '/files/*' on '/files/')
+  // is a valid match result.
+  const wildcardNames = new Set();
+  for (const seg of compiled.segmentNames) {
+    if (seg.type === 'wildcard') wildcardNames.add(seg.name);
+  }
+
   for (let i = 0; i < compiled.segmentNames.length; i++) {
     const segInfo = compiled.segmentNames[i];
-    const value = matchResult[segInfo.index + 1] || '';
-    
+    const hasCapture = segInfo.index + 1 in matchResult;
+    // When an optional group didn't participate, the regex returns undefined.
+    // Normalize to '' so both non-isRegex and isRegex paths behave the same.
+    const rawValue = hasCapture ? matchResult[segInfo.index + 1] : '';
+    const value = rawValue === undefined ? '' : rawValue;
+
     if (usedNames.has(segInfo.name)) {
       if (!Array.isArray(result[segInfo.name])) {
         result[segInfo.name] = [result[segInfo.name]];
@@ -354,8 +453,19 @@ const match = (compiled, str) => {
     }
   }
 
+  // Delete empty-string entries, but preserve wildcards — an empty capture is
+  // a valid match result for wildcards. Also clean null/undefined from arrays.
   for (const key in result) {
-    if (result[key] === '') {
+    const val = result[key];
+    if (Array.isArray(val)) {
+      // Filter out empty-string entries from arrays (but preserve wildcards).
+      const filtered = val.filter(v => v !== '' || wildcardNames.has(key));
+      if (filtered.length === 0) {
+        delete result[key];
+      } else {
+        result[key] = filtered;
+      }
+    } else if (val === '' && !wildcardNames.has(key)) {
       delete result[key];
     }
   }
@@ -384,37 +494,38 @@ const stringify = (compiled, values = {}) => {
     if (segment.optional) {
       let optionalPart = '';
       let j = i;
-      
-      while (j < compiled.segments.length && compiled.segments[j].optional) {
+      const currentGroupId = segment.optionalGroupId;
+
+      while (j < compiled.segments.length && compiled.segments[j].optional && compiled.segments[j].optionalGroupId === currentGroupId) {
         const seg = compiled.segments[j];
-        
+
         if (seg.type === 'literal') {
           optionalPart += seg.name;
         } else if (seg.type === 'named') {
           const val = values[seg.name];
-          if (val !== undefined && val !== null && val !== '') {
-            optionalPart += Array.isArray(val) ? val.join('/') : val;
-          } else {
+          if (isAbsentValue(val)) {
             optionalPart = '';
             break;
           }
+          optionalPart += Array.isArray(val) ? val.join('/') : val;
         } else if (seg.type === 'wildcard') {
           const val = values._;
-          if (val !== undefined && val !== null && val !== '') {
-            optionalPart += Array.isArray(val) ? val.join('/') : val;
-          } else {
+          // Original behaviour: wildcards are skipped in optional groups (values._
+          // is never used here). If wildcard is absent, wipe the group.
+          if (isAbsentValue(val)) {
             optionalPart = '';
             break;
           }
+          optionalPart += Array.isArray(val) ? val.join('/') : val;
         }
-        
+
         j++;
       }
-      
+
       if (optionalPart !== '') {
         result += optionalPart;
       }
-      
+
       if (i === j) {
         i++;
       } else {
@@ -427,13 +538,15 @@ const stringify = (compiled, values = {}) => {
       result += segment.name;
     } else if (segment.type === 'named') {
       const value = values[segment.name];
-      if (value === undefined || value === null || value === '') {
+      if (isAbsentValue(value)) {
         throw new Error(`Missing required value for segment: ${segment.name}`);
       }
       result += Array.isArray(value) ? value.join('/') : value;
     } else if (segment.type === 'wildcard') {
       const value = values._;
-      if (value === undefined || value === null || value === '') {
+      // Empty string is a valid wildcard match result (e.g. '/files/*' on '/files/')
+      // and should be allowed without throwing.
+      if (value === undefined || value === null) {
         throw new Error('Missing required wildcard value');
       }
       result += Array.isArray(value) ? value.join('/') : value;
@@ -495,9 +608,11 @@ const urlPattern = (pattern, options = {}) => {
 
 exports.DEFAULT_OPTIONS = DEFAULT_OPTIONS;
 exports.UrlPattern = UrlPattern;
-exports.default = UrlPattern;
+exports.default = urlPattern;
 exports.makePattern = makePattern;
 exports.makePatternFromRegex = makePatternFromRegex;
 exports.match = match;
 exports.stringify = stringify;
 exports.urlPattern = urlPattern;
+
+module.exports = Object.assign(module.exports.default, module.exports);
