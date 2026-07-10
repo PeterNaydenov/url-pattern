@@ -5,14 +5,15 @@
 
 /**
  * @typedef {Object} UrlPatternOptions
- * @property {string} [escapeChar='\\'] - Character used for escaping special characters
+ * @property {string} [escapeChar='\\'] - Character used for escaping. Only escapes regex metacharacters (`^$.*+?()[]{}|\`); for any other character the backslash is treated as a literal.
  * @property {string} [segmentNameStartChar=':'] - Character that starts a named segment
  * @property {string} [segmentNameEndChar] - Character that ends a named segment. When set, the segment name stops at the first occurrence of this character (instead of stopping at the first character outside `segmentNameCharset`).
  * @property {string} [segmentNameCharset='a-zA-Z0-9_'] - Characters allowed in segment names
  * @property {string} [segmentValueCharset='a-zA-Z0-9-_~ %'] - Characters allowed in segment values
  * @property {string} [optionalSegmentStartChar='('] - Character that starts an optional segment
  * @property {string} [optionalSegmentEndChar=')'] - Character that ends an optional segment
- * @property {string} [wildcardChar='*'] - Character that denotes a wildcard
+ * @property {string} [wildcardChar='*'] - Character that denotes a wildcard in the pattern
+ * @property {string} [wildcardName='_'] - Key under which the wildcard value is stored in the match result
  */
 
 /**
@@ -55,7 +56,8 @@ const DEFAULT_OPTIONS = {
   segmentValueCharset: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_~ %',
   optionalSegmentStartChar: '(',
   optionalSegmentEndChar: ')',
-  wildcardChar: '*'
+  wildcardChar: '*',
+  wildcardName: '_'
 };
 
 /**
@@ -149,10 +151,10 @@ const parsePattern = (pattern, options) => {
       }
       const nextChar = pattern[i + 1];
       // Only treat \ as an escape when followed by a regex metacharacter.
-      // For all other characters the backslash is literal (e.g. '\)' in a URL
-      // is just a backslash followed by ')'). This prevents the escape handler
-      // from accidentally consuming the optional-group close delimiter ')'.
-      const regexMetachars = '^$\.*+?()[]{}|\\';
+      // For any other character the backslash is literal (e.g. '\:' in a URL
+      // is just a backslash followed by ':'). This means `:` cannot be escaped
+      // — it has no special meaning in regex, so the escape adds nothing.
+      const regexMetachars = '^$.*+?()[]{}|\\';
       if (!regexMetachars.includes(nextChar)) {
         // Not a regex metachar: treat the backslash as a literal character,
         // advance past it so the next character is processed normally.
@@ -164,6 +166,7 @@ const parsePattern = (pattern, options) => {
           optionalGroupId: inOptional ? optionalGroupId : undefined
         });
         i += 1;
+        continue;
       } else {
         segments.push({
           type: 'literal',
@@ -198,7 +201,7 @@ const parsePattern = (pattern, options) => {
     if (char === options.wildcardChar) {
       segments.push({
         type: 'wildcard',
-        name: '_',
+        name: options.wildcardName,
         regex: '.*',
         optional: inOptional,
         optionalGroupId: inOptional ? optionalGroupId : undefined
@@ -275,13 +278,15 @@ const parsePattern = (pattern, options) => {
 };
 
 /**
-/**
  * Returns true when a value should be treated as "absent" for an optional segment.
  * @param {*} val - Value to inspect
  * @returns {boolean}
  */
 const isAbsentValue = (val) => {
   if (val === undefined || val === null || val === '') return true;
+  // Number.isNaN catches numeric NaN values that would otherwise stringify to
+  // the literal string "NaN" in a generated URL.
+  if (typeof val === 'number' && Number.isNaN(val)) return true;
   if (Array.isArray(val) && val.length === 0) return true;
   return false;
 };
@@ -292,7 +297,7 @@ const isAbsentValue = (val) => {
  * @param {UrlPatternOptions} options - Options
  * @returns {{regex: string, segmentNames: Array<SegmentName>}} Compiled regex and segment names
  */
-const compileRegex = (segments, _options) => {
+const compileRegex = (segments, options) => {
   let regex = '^';
   let groupIndex = 0;
   /** @type {Array<SegmentName>} */
@@ -312,7 +317,7 @@ const compileRegex = (segments, _options) => {
         
         if (seg.type === 'wildcard') {
           optionalPart += '(.*)';
-          segmentNames.push({ name: '_', index: groupIndex, type: 'wildcard' });
+          segmentNames.push({ name: options.wildcardName, index: groupIndex, type: 'wildcard' });
           groupIndex++;
         } else if (seg.type === 'named') {
           optionalPart += seg.regex;
@@ -332,7 +337,7 @@ const compileRegex = (segments, _options) => {
 
     if (segment.type === 'wildcard') {
       regex += '(.*)';
-      segmentNames.push({ name: '_', index: groupIndex, type: 'wildcard' });
+      segmentNames.push({ name: options.wildcardName, index: groupIndex, type: 'wildcard' });
       groupIndex++;
     } else if (segment.type === 'named') {
       regex += segment.regex;
@@ -379,9 +384,20 @@ const makePattern = (pattern, options = {}) => {
  * @returns {CompiledPattern} Compiled pattern
  */
 const makePatternFromRegex = (regex, keys = []) => {
+  // Strip the `g` and `y` flags. The `g` flag makes `RegExp.prototype.exec`
+  // advance `lastIndex` between calls, which would cause subsequent matches
+  // to start from the wrong position. The `y` (sticky) flag requires a match
+  // starting exactly at `lastIndex`, which is incompatible with our
+  // anchored, single-match contract. Other flags (`i`, `m`, `s`, `d`, `u`)
+  // are preserved.
+  const safeFlags = regex.flags.replace(/[gy]/g, '');
+  const regexObj = safeFlags === regex.flags
+    ? regex
+    : new RegExp(regex.source, safeFlags);
+
   return {
     regex: regex.source,
-    regexObj: regex,
+    regexObj,
     segments: [],
     segmentNames: keys.map((name, index) => ({ name, index, type: 'named' })),
     options: DEFAULT_OPTIONS,
@@ -397,6 +413,14 @@ const makePatternFromRegex = (regex, keys = []) => {
  * @returns {Object|null} Extracted values or null if no match
  */
 const match = (compiled, str) => {
+  // Guard against non-string input. `RegExp.prototype.exec` coerces with
+  // String(), so `match(123)` would silently try to match "123" — almost
+  // certainly not what the caller meant. Throw a TypeError so the misuse
+  // surfaces immediately.
+  if (typeof str !== 'string') {
+    throw new TypeError(`pattern.match() requires a string, got ${typeof str}`);
+  }
+
   const matchResult = compiled.regexObj.exec(str);
   
   if (!matchResult) {
@@ -416,6 +440,10 @@ const match = (compiled, str) => {
       });
       return result;
     }
+    // No keys, no groups → return the captured values as an array. If the
+    // regex had no capture groups, this is an empty array; we keep the
+    // existing behaviour (documented in the README's regex example) rather
+    // than coercing to `{}` and breaking callers that rely on the array.
     return matchResult.slice(1);
   }
 
@@ -505,9 +533,9 @@ const stringify = (compiled, values = {}) => {
           }
           optionalPart += Array.isArray(val) ? val.join('/') : val;
         } else if (seg.type === 'wildcard') {
-          const val = values._;
-          // Original behaviour: wildcards are skipped in optional groups (values._
-          // is never used here). If wildcard is absent, wipe the group.
+          const val = values[compiled.options.wildcardName];
+          // Wildcards inside an optional group still consume values[wildcardName]
+          // when present; if absent, the whole group is wiped.
           if (isAbsentValue(val)) {
             optionalPart = '';
             break;
@@ -539,7 +567,7 @@ const stringify = (compiled, values = {}) => {
       }
       result += Array.isArray(value) ? value.join('/') : value;
     } else if (segment.type === 'wildcard') {
-      const value = values._;
+      const value = values[compiled.options.wildcardName];
       // Empty string is a valid wildcard match result (e.g. '/files/*' on '/files/')
       // and should be allowed without throwing.
       if (value === undefined || value === null) {
@@ -571,6 +599,12 @@ class UrlPattern {
       /** @type {CompiledPattern} */
       this.compiled = makePattern(pattern, /** @type {UrlPatternOptions} */ (options));
     }
+    // The compiled state is exposed as a read-only introspection field; freeze
+    // it (and the nested `options` object) so accidental mutation fails loudly
+    // instead of silently desynchronising the cached regex. `Object.freeze`
+    // is shallow, so we explicitly freeze `options` too.
+    Object.freeze(this.compiled.options);
+    Object.freeze(this.compiled);
   }
 
   /**
