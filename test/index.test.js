@@ -655,4 +655,74 @@ describe('url-pattern', () => {
       }).toThrow();
     });
   });
+
+  // ----------------------------------------------------------------------
+  // Build / packaging.
+  // ----------------------------------------------------------------------
+
+  describe('CJS dist file', () => {
+    // The CJS dist file must be loadable via require() even though the
+    // package's package.json has "type": "module". Previously the file was
+    // named url-pattern.cjs.js which Node treated as ESM (because of the
+    // .js extension), causing require() to fail and the named exports to
+    // come back as undefined.
+    test('require() returns a usable module with named exports', () => {
+      const { execSync } = require('node:child_process');
+      const result = execSync(
+        `node -e "const m = require('@peter.naydenov/url-pattern'); ` +
+        `process.stdout.write(JSON.stringify({ ` +
+        `  isFn: typeof m === 'function', ` +
+        `  hasUrlPattern: typeof m.UrlPattern, ` +
+        `  hasFactory: typeof m.urlPattern, ` +
+        `  canConstruct: (() => { try { new m.UrlPattern('/api/:id'); return true; } catch { return false; } })() ` +
+        `}));"`,
+        { cwd: process.cwd(), encoding: 'utf-8' }
+      );
+      const parsed = JSON.parse(result);
+      expect(parsed.isFn).toBe(true);
+      expect(parsed.hasUrlPattern).toBe('function');
+      expect(parsed.hasFactory).toBe('function');
+      expect(parsed.canConstruct).toBe(true);
+    });
+
+    test('dist file uses .cjs extension (not .cjs.js) to avoid ESM loading', () => {
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const cjsPath = path.join(process.cwd(), 'dist', 'url-pattern.cjs');
+      const badPath = path.join(process.cwd(), 'dist', 'url-pattern.cjs.js');
+      expect(fs.existsSync(cjsPath)).toBe(true);
+      expect(fs.existsSync(badPath)).toBe(false);
+    });
+  });
+
+  describe('package entry points', () => {
+    // The source is the primary entry. ESM consumers and bundlers should
+    // resolve to src/main.js directly, not to a transpiled dist artifact.
+    // CJS consumers still get the pre-built dist/url-pattern.cjs.
+    test('ESM import resolves to src/main.js', () => {
+      const { execSync } = require('node:child_process');
+      const result = execSync(
+        `node --input-type=module -e "const u = await import.meta.resolve('@peter.naydenov/url-pattern'); ` +
+        `process.stdout.write(u);"`,
+        { cwd: process.cwd(), encoding: 'utf-8' }
+      );
+      expect(result).toMatch(/src\/main\.js$/);
+    });
+
+    test('CJS require resolves to dist/url-pattern.cjs', () => {
+      const result = require.resolve('@peter.naydenov/url-pattern');
+      expect(result).toMatch(/dist\/url-pattern\.cjs$/);
+    });
+
+    test('package.json main field points to src', () => {
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf-8'));
+      expect(pkg.main).toBe('./src/main.js');
+      expect(pkg.module).toBe('./src/main.js');
+      expect(pkg.exports['.'].import).toBe('./src/main.js');
+      expect(pkg.exports['.'].default).toBe('./src/main.js');
+      expect(pkg.exports['.'].require).toBe('./dist/url-pattern.cjs');
+    });
+  });
 });
