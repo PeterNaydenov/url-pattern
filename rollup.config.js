@@ -9,7 +9,11 @@ export default {
       name: 'urlPattern'
     },
     {
-      file: 'dist/url-pattern.cjs.js',
+      // Use the `.cjs` extension (not `.cjs.js`) because the package has
+      // `"type": "module"` in its package.json. Without this, Node would
+      // treat any `.js` file as ESM and the CJS file would fail to load
+      // when consumers do `require('@peter.naydenov/url-pattern')`.
+      file: 'dist/url-pattern.cjs',
       format: 'cjs',
       name: 'urlPattern',
       exports: 'named',
