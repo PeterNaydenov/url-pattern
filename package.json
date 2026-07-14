@@ -9,7 +9,8 @@
   "files": [
     "dist",
     "types",
-    "src"
+    "src",
+    "CHANGELOG.md"
   ],
   "exports": {
     ".": {
