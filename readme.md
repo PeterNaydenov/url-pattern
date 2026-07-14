@@ -6,7 +6,7 @@
 [![GitHub top language](https://img.shields.io/github/languages/top/PeterNaydenov/url-pattern.svg)](https://github.com/PeterNaydenov/url-pattern)
 [![npm bundle size](https://img.shields.io/bundlejs/size/@peter.naydenov/url-pattern.svg)](https://www.npmjs.com/package/@peter.naydenov/url-pattern)
 
-Easier than regex string matching patterns for urls and other strings. Turn strings into data or data into strings.
+String-matching patterns for URLs and other strings — easier than regex. Turn strings into data or data into strings.
 
 ## Install
 
@@ -14,13 +14,13 @@ Easier than regex string matching patterns for urls and other strings. Turn stri
 npm install @peter.naydenov/url-pattern
 ```
 
-Once it has been installed, it can be used by writing this line of JavaScript:
+Once it has been installed, it can be used with one of the following:
 
 ```js
-// if you are using ES6:
+// if you are using ES modules:
 import urlPattern from '@peter.naydenov/url-pattern'
 
-// if you are using commonJS:
+// if you are using CommonJS:
 const urlPattern = require ( '@peter.naydenov/url-pattern' )
 ```
 
@@ -43,10 +43,10 @@ console.log ( result )
 ```js
 import urlPattern from '@peter.naydenov/url-pattern'
 
-const pattern = urlPattern ( '/api/(v1)/users/:id' )
-const result = pattern.match ( '/api/v1/users/456' )
-
-console.log ( result )
+const pattern = urlPattern ( '/api(/:version)/users/:id' )
+console.log ( pattern.match ( '/api/v1/users/456' ) )
+// Output: { version: 'v1', id: '456' }
+console.log ( pattern.match ( '/api/users/456' ) )
 // Output: { id: '456' }
 ```
 
@@ -89,11 +89,6 @@ const result = pattern.match ( '/user/john/post/123' )
 console.log ( result )
 // Output: { username: 'john', postId: '123' }
 ```
-## URL Patterns
-
-See [supported URL pattern types with examples](./PATTERNS.md).
-
-
 
 ## API Reference
 
@@ -124,11 +119,11 @@ Matches a string against the pattern and returns an object with captured values,
 
 #### `pattern.stringify(data)`
 
-Generates a URL string from provided data object.
+Generates a URL string from provided data object. Throws an `Error` when a required segment is missing from `data` (e.g. a required `:id` has no matching `id` property).
 
 #### `pattern.compiled`
 
-Read-only object exposing the internal compiled state: `regex` (regex source), `regexObj` (compiled `RegExp`), `segments` (parsed segments array), `segmentNames` (segment name → capture-group mappings), `options` (merged options), `isRegex` (whether the pattern was created from a regex), and `pattern` (the original pattern string). The object is frozen — any attempt to mutate it will throw in strict mode (or fail silently elsewhere). Useful for introspection; do not mutate.
+Read-only object exposing the internal compiled state: `regex` (regex source), `regexObj` (compiled `RegExp`), `segments` (parsed segments array), `segmentNames` (segment name → capture-group mappings), `options` (merged options), `isRegex` (whether the pattern was created from a regex), and `pattern` (the original pattern string). For regex-based patterns, `keys` is also present (the list of capture-group key names). The object is frozen — any attempt to mutate it will throw in strict mode (or fail silently elsewhere). Useful for introspection; do not mutate.
 
 ## Notes
 
@@ -162,4 +157,4 @@ When you pass a `RegExp` to `urlPattern`, the `g` and `y` flags are stripped. Th
 
 ## License
 
-'@peter.naydenov/url-pattern' is released under the [MIT License](https://github.com/PeterNaydenov/git-url-pattern/blob/main/LICENSE).
+'@peter.naydenov/url-pattern' is released under the [MIT License](https://github.com/PeterNaydenov/url-pattern/blob/main/LICENSE).
