@@ -724,5 +724,69 @@ describe('url-pattern', () => {
       expect(pkg.exports['.'].default).toBe('./src/main.js');
       expect(pkg.exports['.'].require).toBe('./dist/url-pattern.cjs');
     });
+
+    test('CHANGELOG.md is in the published files list (case-sensitive)', () => {
+      // On Linux (the npm registry's filesystem), the old npmignore entry
+      // `!Changelog.md` did not match the actual file `CHANGELOG.md`, so the
+      // changelog was silently excluded from the published tarball. Lock
+      // in the fix by checking the files array and the npmignore entry.
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf-8'));
+      const npmignore = fs.readFileSync(path.join(process.cwd(), '.npmignore'), 'utf-8');
+      expect(pkg.files).toContain('CHANGELOG.md');
+      expect(npmignore).toMatch(/!CHANGELOG\.md/);
+      expect(npmignore).not.toMatch(/!Changelog\.md/);
+    });
+
+    test('npm pack includes the changelog and the source', () => {
+      // Use --dry-run to avoid creating an actual tarball.
+      const { execSync } = require('node:child_process');
+      const result = execSync('npm pack --dry-run 2>&1', { cwd: process.cwd(), encoding: 'utf-8' });
+      expect(result).toMatch(/CHANGELOG\.md/);
+      expect(result).toMatch(/src\/main\.js/);
+    });
+  });
+
+  // ----------------------------------------------------------------------
+  // Shared-state isolation.
+  // ----------------------------------------------------------------------
+
+  describe('per-pattern option isolation', () => {
+    // The UrlPattern constructor freezes `compiled.options` for read-only
+    // semantics. For a regex pattern, the compiled options were previously
+    // a reference to the global DEFAULT_OPTIONS, so freezing one pattern
+    // would silently freeze the default for every other pattern created
+    // afterwards.
+    test('freezing a regex pattern does not freeze the global DEFAULT_OPTIONS', () => {
+      'use strict';
+      // The shared DEFAULT_OPTIONS object is exported as a named export
+      // (for introspection). Before the fix, freezing the first regex
+      // pattern's compiled.options would also freeze DEFAULT_OPTIONS,
+      // breaking any consumer that imported it.
+      const { DEFAULT_OPTIONS } = require('../src/main.js');
+      // Create a regex pattern first; its constructor freezes its compiled.options.
+      const _r = urlPattern(/foo/, ['name']);
+      // The global should still be mutable.
+      expect(() => {
+        DEFAULT_OPTIONS.segmentNameCharset = 'abc';
+      }).not.toThrow();
+      // The string pattern's merged options should also be mutable? No —
+      // per the design, each pattern's compiled.options is frozen. So we
+      // don't assert that. We only assert the shared global is not frozen.
+      expect(Object.isFrozen(DEFAULT_OPTIONS)).toBe(false);
+    });
+
+    test('regex pattern gets a fresh copy of DEFAULT_OPTIONS, not the shared reference', () => {
+      const r1 = urlPattern(/foo/, []);
+      const r2 = urlPattern(/bar/, []);
+      expect(r1.compiled.options).not.toBe(r2.compiled.options);
+    });
+
+    test('string patterns still get independent options (regression check)', () => {
+      const s1 = urlPattern('/a');
+      const s2 = urlPattern('/b');
+      expect(s1.compiled.options).not.toBe(s2.compiled.options);
+    });
   });
 });
