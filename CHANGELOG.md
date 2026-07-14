@@ -2,6 +2,15 @@
 
 
 
+### 1.0.6 (2026-07-14)
+- [x] **🔴 `CHANGELOG.md` is now actually published**. The `.npmignore` had a `!Changelog.md` exception, but the actual file is `CHANGELOG.md`. On case-sensitive filesystems (Linux, the npm registry) the exception didn't match, so the changelog was silently excluded from the published tarball. Renamed the exception to `!CHANGELOG.md` and added `CHANGELOG.md` to the `files` allowlist so it ships regardless of the ignore rules;
+- [x] **Regex patterns no longer poison the global `DEFAULT_OPTIONS`**. `makePatternFromRegex` was returning `options: DEFAULT_OPTIONS` (the shared global), so the constructor's `Object.freeze(compiled.options)` silently froze the global for every other pattern. Now regex patterns get a fresh copy (`{ ...DEFAULT_OPTIONS }`) and the global stays mutable for consumers that import it;
+- [x] `vitest.config.js` no longer excludes `src/main.js` from coverage — that was excluding the entire source from the coverage report (`src/main.js` is the only file in `src/`);
+- [x] `tsconfig.json` updated to `module: "ESNext"` (was `"commonjs"`) so type checking matches the actual ESM source;
+- [x] Removed the now-redundant `src/` entry from `.npmignore` — `src` is in the `files` allowlist and the user wants it published as the primary entry;
+- [x] **README**: License link fixed (was pointing to a non-existent `git-url-pattern` repo, now points to the real `url-pattern` one); the "Match a URL with optional segments" example now uses a named optional segment (`/:version`) instead of a literal one, so the section title actually matches the example; the `pattern.compiled` docs now mention the `keys` field present on regex-based patterns; the `pattern.stringify` docs now warn that it throws on missing required values; the redundant "## URL Patterns" stub section was removed (the link to PATTERNS.md is still in the "Links" section); minor wording fixes (tagline, "ES6" → "ES modules", "this line" → "this code").
+
+
 ### 1.0.5 (2026-07-10)
 - [x] **🔴 CJS dist file rename: `url-pattern.cjs.js` → `url-pattern.cjs`**. The previous filename ended in `.js`, so Node tried to load it as an ES module (because the package's `package.json` has `"type": "module"`), but the file used CommonJS syntax (`exports`, `module.exports`). The result was a silent failure: `require('@peter.naydenov/url-pattern')` returned an empty object and `new UrlPattern(path)` threw `TypeError: UrlPattern is not a constructor`. The new `.cjs` extension forces Node to treat it as CJS regardless of the package's `type` field;
 - [x] **Source is now the primary entry point**. `package.json` `main`, `module`, `exports[import]`, and `exports[default]` all point to `./src/main.js` — ESM consumers and bundlers (Vite, webpack, Rollup, esbuild) get the source directly, no transpilation in between. CJS consumers still get the pre-built `dist/url-pattern.cjs`. The `dist/` directory is preserved for the UMD browser bundle and the CJS Node bundle;
