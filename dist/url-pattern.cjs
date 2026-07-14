@@ -404,7 +404,12 @@ const makePatternFromRegex = (regex, keys = []) => {
     regexObj,
     segments: [],
     segmentNames: keys.map((name, index) => ({ name, index, type: 'named' })),
-    options: DEFAULT_OPTIONS,
+    // Use a fresh copy of DEFAULT_OPTIONS rather than the shared reference.
+    // The UrlPattern constructor freezes `compiled.options` for read-only
+    // semantics; if we returned the shared global, freezing one pattern's
+    // `compiled.options` would silently freeze the global for every other
+    // pattern created afterwards.
+    options: { ...DEFAULT_OPTIONS },
     isRegex: true,
     keys
   };
