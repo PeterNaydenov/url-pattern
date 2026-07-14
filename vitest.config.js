@@ -11,9 +11,8 @@ export default defineConfig({
   },
   coverage: {
     provider: 'v8',
-    reporter: [ 'text', 'json', 'html', "lcov",
-      "text-summary"],
+    reporter: ['text', 'json', 'html', 'lcov', 'text-summary'],
     include: ['src/**/*.js'],
-    exclude: ['src/main.js'],
+    // No exclude — the entire source is `src/main.js`, and we want it covered.
   },
 });
