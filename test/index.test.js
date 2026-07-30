@@ -537,6 +537,45 @@ describe('url-pattern', () => {
       const pattern = urlPattern('/files/\\*');
       expect(pattern.match('/files/*')).toEqual({});
     });
+
+    test('custom escape char followed by a non-regex-metachar is kept as a literal', () => {
+      // '%:' is the custom escape char '%' followed by ':' (not a regex
+      // metachar). The escape char must be kept as a literal, and ':'
+      // is then processed normally as the start of a named segment.
+      // Before the fix, the LITERAL branch hardcoded `\` regardless of
+      // the configured escapeChar — so '%' was silently dropped and the
+      // next char was treated as a `\`-prefixed literal `:`.
+      const pattern = urlPattern('/foo%:bar', { escapeChar: '%' });
+      expect(pattern.match('/foo%bar')).toEqual({ bar: 'bar' });
+      // The literal in the compiled segment is the actual escape char,
+      // not a hardcoded backslash.
+      const literalSegment = pattern.compiled.segments.find(
+        (s) => s.type === 'literal' && s.name.length === 1
+      );
+      expect(literalSegment).toBeDefined();
+      expect(literalSegment.name).toBe('%');
+    });
+
+    test('custom escape char in stringify produces the configured char, not a backslash', () => {
+      const pattern = urlPattern('/foo%:bar', { escapeChar: '%' });
+      expect(pattern.stringify({ bar: 'baz' })).toBe('/foo%baz');
+    });
+
+    test('custom escape char followed by a non-metachar letter is kept as a literal', () => {
+      // '%a' is the escape char '%' followed by 'a' (not a metachar).
+      // The escape char must remain in the pattern.
+      const pattern = urlPattern('/foo%a:bar', { escapeChar: '%' });
+      expect(pattern.match('/foo%abar')).toEqual({ bar: 'bar' });
+      expect(pattern.stringify({ bar: 'baz' })).toBe('/foo%abaz');
+    });
+
+    test('trailing custom escape char error mentions the actual escape char', () => {
+      // The error message must reflect the configured escapeChar, not
+      // always say `\`. This is a small UX fix.
+      expect(() => urlPattern('/foo%', { escapeChar: '%' })).toThrow(/%/);
+      // Default escape char still mentions `\` in the error.
+      expect(() => urlPattern('/foo\\')).toThrow(/\\/);
+    });
   });
 
   describe('wildcard empty string in stringify', () => {
@@ -787,6 +826,261 @@ describe('url-pattern', () => {
       const s1 = urlPattern('/a');
       const s2 = urlPattern('/b');
       expect(s1.compiled.options).not.toBe(s2.compiled.options);
+    });
+  });
+
+  // ----------------------------------------------------------------------
+  // Stringify round-trip fixes.
+  // Each describe block corresponds to one of the round-trip bugs found
+  // after the 1.0.6 release: stringify used to produce URLs that did not
+  // match the originating pattern. See CHANGELOG for details.
+  // ----------------------------------------------------------------------
+
+  describe('stringify bug 1: array with empty elements on optional named segment', () => {
+    // An array of only empty/null/undefined strings used to be treated as
+    // "present" and joined to '' — but the literal `/` separator in the
+    // group had already been appended, so the produced URL ended with a
+    // dangling slash and no value, which `match` then rejected.
+    test('stringify([\"\"]) on optional wipes the group', () => {
+      const pattern = urlPattern('/api(/:ids)');
+      expect(pattern.stringify({ ids: [''] })).toBe('/api');
+      expect(pattern.match('/api')).toEqual({});
+    });
+
+    test('stringify([null]) on optional wipes the group', () => {
+      const pattern = urlPattern('/api(/:ids)');
+      expect(pattern.stringify({ ids: [null] })).toBe('/api');
+    });
+
+    test('stringify([undefined]) on optional wipes the group', () => {
+      const pattern = urlPattern('/api(/:ids)');
+      expect(pattern.stringify({ ids: [undefined] })).toBe('/api');
+    });
+
+    test('non-empty array on optional still joins with `/` (regression)', () => {
+      // The single-segment case with an array is documented to join with
+      // `/`. The fix only changes behaviour for arrays that join to empty.
+      const pattern = urlPattern('/api/users(/:ids)');
+      expect(pattern.stringify({ ids: ['x', 'y'] })).toBe('/api/users/x/y');
+    });
+  });
+
+  describe('stringify bug 2: literal-only optional groups', () => {
+    // A group that contains only literal segments has no named/wildcard
+    // to drive the inclusion decision. Before the fix, `stringify({})`
+    // for `/api(/v)` still produced `/api/v` because the literal was
+    // always appended. The new rule: when no values are provided, the
+    // minimal URL is generated, so literal-only groups are wiped.
+    test('stringify({}) wipes a literal-only optional group', () => {
+      const pattern = urlPattern('/api(/v)');
+      expect(pattern.stringify({})).toBe('/api');
+      expect(pattern.match('/api')).toEqual({});
+    });
+
+    test('stringify() with no args also wipes literal-only groups', () => {
+      const pattern = urlPattern('/api(/v)');
+      expect(pattern.stringify()).toBe('/api');
+    });
+
+    test('literal-only group is included when other values are provided', () => {
+      // When the user IS providing values (e.g. for a sibling segment),
+      // we have no way to know whether the literal-only group should be
+      // included or not. The choice is: include it (current behaviour
+      // for groups with named). Document the choice here so a future
+      // refactor doesn't silently change it.
+      const pattern = urlPattern('/api(/v/:id)');
+      expect(pattern.stringify({ id: 'x' })).toBe('/api/v/x');
+    });
+  });
+
+  describe('stringify bug 3: optional groups are atomic', () => {
+    // The inner loop used to `break` at the first missing value, but
+    // the outer loop then continued processing the remaining segments in
+    // the same group. That made a missing value in the middle of a group
+    // emit a half-baked URL (e.g. `/api/a/b` for `/api(/:id/*)` when
+    // only `_` was provided) that `match` could not reproduce.
+    test('missing named in the middle of a group wipes the whole group', () => {
+      const pattern = urlPattern('/api(/:id/*)');
+      expect(pattern.stringify({ _: 'a/b' })).toBe('/api');
+    });
+
+    test('missing wildcard in the middle of a group wipes the whole group', () => {
+      const pattern = urlPattern('/api(/*/:id)');
+      expect(pattern.stringify({ id: 'x' })).toBe('/api');
+    });
+
+    test('group with all values provided round-trips through match', () => {
+      const pattern = urlPattern('/api(/:a/*/:b)');
+      const url = pattern.stringify({ a: 'x', b: 'y', _: 'z' });
+      expect(url).toBe('/api/x/z/y');
+      expect(pattern.match(url)).toEqual({ a: 'x', _: 'z', b: 'y' });
+    });
+
+    test('missing trailing value still wipes the whole group', () => {
+      const pattern = urlPattern('/api(/:a/:b)');
+      expect(pattern.stringify({ a: 'x' })).toBe('/api');
+    });
+  });
+
+  describe('stringify bug 4: array distributes across repeated segment names', () => {
+    // `/api/:ids/posts/:ids` with `{ids: '1/2'}` used to produce
+    // `/api/1/2/posts/1/2` (same joined string for both positions).
+    // Now an array distributes element-by-element, and a non-array value
+    // is reused (backward-compatible).
+    test('array distributes across two occurrences', () => {
+      const pattern = urlPattern('/api/:ids/posts/:ids');
+      expect(pattern.stringify({ ids: ['1', '2'] })).toBe('/api/1/posts/2');
+    });
+
+    test('array distributes across three occurrences', () => {
+      const pattern = urlPattern('/:a/:a/:a');
+      expect(pattern.stringify({ a: ['x', 'y', 'z'] })).toBe('/x/y/z');
+    });
+
+    test('non-array value is reused across occurrences (backward compat)', () => {
+      const pattern = urlPattern('/api/:ids/posts/:ids');
+      expect(pattern.stringify({ ids: 'x' })).toBe('/api/x/posts/x');
+    });
+
+    test('shorter array falls back to the last element', () => {
+      const pattern = urlPattern('/api/:a/:a/:a');
+      expect(pattern.stringify({ a: ['x'] })).toBe('/api/x/x/x');
+    });
+
+    test('array distributes across repeated wildcards too', () => {
+      const pattern = urlPattern('/api/*/posts/*');
+      expect(pattern.stringify({ _: ['a', 'b'] })).toBe('/api/a/posts/b');
+    });
+
+    test('round-trip: match result fed back into stringify', () => {
+      // The match side already returns an array for repeated names, so
+      // feeding the match result back into stringify should now reproduce
+      // the same URL. Before the fix, the joined string was used for both
+      // positions and round-tripping was impossible.
+      const pattern = urlPattern('/api/:ids/posts/:ids');
+      const matched = pattern.match('/api/1/posts/2');
+      expect(matched).toEqual({ ids: ['1', '2'] });
+      expect(pattern.stringify(matched)).toBe('/api/1/posts/2');
+    });
+  });
+
+  describe('stringify bug 5: required single segment joins array with `/` (matches optional behaviour)', () => {
+    // `/api/:id` with `{id: ['a', 'b']}` produces `/api/a/b`. This is
+    // the same documented asymmetry that exists for optional segments
+    // (see the "non-empty array on optional segment is still joined with
+    // `/`" test) — the match side rejects `/` because it is not in the
+    // default value charset. The behaviour is consistent across required
+    // and optional positions; we just document it here for required so
+    // a future refactor cannot silently change one without the other.
+    test('required named segment joins array with `/`', () => {
+      const pattern = urlPattern('/api/:id');
+      expect(pattern.stringify({ id: ['a', 'b'] })).toBe('/api/a/b');
+    });
+
+    test('required wildcard joins array with `/`', () => {
+      const pattern = urlPattern('/api/*');
+      expect(pattern.stringify({ _: ['a', 'b'] })).toBe('/api/a/b');
+    });
+
+    test('required named still accepts a string (regression)', () => {
+      const pattern = urlPattern('/api/:id');
+      expect(pattern.stringify({ id: 'a' })).toBe('/api/a');
+    });
+
+    test('required named still throws on missing string (regression)', () => {
+      const pattern = urlPattern('/api/:id');
+      expect(() => pattern.stringify({})).toThrow(/Missing required value/);
+    });
+
+    test('required named still throws on empty array (regression)', () => {
+      // Empty array is "absent" and the existing throw still applies.
+      const pattern = urlPattern('/api/:id');
+      expect(() => pattern.stringify({ id: [] })).toThrow(/Missing required value/);
+    });
+
+    test('required named still throws on null (regression)', () => {
+      const pattern = urlPattern('/api/:id');
+      expect(() => pattern.stringify({ id: null })).toThrow(/Missing required value/);
+    });
+  });
+
+  describe('stringify robustness: null/undefined values argument', () => {
+    // `Object.keys(null)` throws. The function coerces non-object inputs
+    // to {} so the documented "no values provided" path still works.
+    test('stringify(null) does not throw', () => {
+      const pattern = urlPattern('/api/:id');
+      expect(() => pattern.stringify(null)).toThrow(/Missing required value/);
+    });
+  });
+
+  // ----------------------------------------------------------------------
+  // Deep-freeze of the compiled object.
+  // The 1.0.4 release froze `compiled` and `compiled.options` so accidental
+  // mutation would throw in strict mode. But `Object.freeze` is shallow,
+  // and `compiled.segments` / `compiled.segmentNames` and the objects
+  // inside them were left mutable — so mutating them in strict mode did
+  // not throw and could silently desync the cached regex.
+  // ----------------------------------------------------------------------
+
+  describe('deep-freeze of compiled', () => {
+    test('compiled.segments is frozen', () => {
+      const pattern = urlPattern('/api/:id');
+      expect(Object.isFrozen(pattern.compiled.segments)).toBe(true);
+    });
+
+    test('compiled.segmentNames is frozen', () => {
+      const pattern = urlPattern('/api/:id');
+      expect(Object.isFrozen(pattern.compiled.segmentNames)).toBe(true);
+    });
+
+    test('individual segment objects are frozen', () => {
+      const pattern = urlPattern('/api/:id');
+      expect(Object.isFrozen(pattern.compiled.segments[0])).toBe(true);
+      expect(Object.isFrozen(pattern.compiled.segments[1])).toBe(true);
+    });
+
+    test('individual segmentName objects are frozen', () => {
+      const pattern = urlPattern('/api/:id');
+      expect(Object.isFrozen(pattern.compiled.segmentNames[0])).toBe(true);
+    });
+
+    test('regex pattern keys array is also frozen', () => {
+      const pattern = urlPattern(/^foo\$/, ['name']);
+      expect(Object.isFrozen(pattern.compiled.keys)).toBe(true);
+    });
+
+    test('mutating compiled.segments.push throws in strict mode', () => {
+      'use strict';
+      const pattern = urlPattern('/api/:id');
+      expect(() => {
+        pattern.compiled.segments.push({
+          type: 'literal', name: 'X', regex: 'X', optional: false
+        });
+      }).toThrow();
+    });
+
+    test('mutating compiled.segments[i].name throws in strict mode', () => {
+      'use strict';
+      const pattern = urlPattern('/api/:id');
+      expect(() => {
+        pattern.compiled.segments[0].name = 'MUTATED';
+      }).toThrow();
+    });
+
+    test('mutating compiled.segmentNames.push throws in strict mode', () => {
+      'use strict';
+      const pattern = urlPattern('/api/:id');
+      expect(() => {
+        pattern.compiled.segmentNames.push({ name: 'X', index: 99, type: 'named' });
+      }).toThrow();
+    });
+
+    test('regexObj is not frozen (would break lastIndex writes)', () => {
+      // RegExp instances are intentionally skipped by the deep-freeze:
+      // freezing a RegExp would make its `lastIndex` non-writable and
+      // break the match function on subsequent calls.
+      const pattern = urlPattern(/^foo\$/, []);
+      expect(Object.isFrozen(pattern.compiled.regexObj)).toBe(false);
     });
   });
 });
