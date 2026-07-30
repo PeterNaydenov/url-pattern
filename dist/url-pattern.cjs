@@ -151,21 +151,25 @@ const parsePattern = (pattern, options) => {
       // Throw when the escape char is at the end of the pattern — nothing follows
       // it to escape, and the resulting regex would be broken.
       if (i + 1 >= pattern.length) {
-        throw new Error(`Invalid pattern: '\\' at position ${i} has nothing to escape`);
+        throw new Error(`Invalid pattern: '${options.escapeChar}' at position ${i} has nothing to escape`);
       }
       const nextChar = pattern[i + 1];
-      // Only treat \ as an escape when followed by a regex metacharacter.
-      // For any other character the backslash is literal (e.g. '\:' in a URL
-      // is just a backslash followed by ':'). This means `:` cannot be escaped
-      // — it has no special meaning in regex, so the escape adds nothing.
+      // Only treat the escape char as an escape when followed by a regex
+      // metacharacter. For any other character the escape char is kept as a
+      // literal (e.g. '\:' in a URL is just a backslash followed by ':').
+      // This means `:` cannot be escaped — it has no special meaning in
+      // regex, so the escape adds nothing. Same applies when a custom
+      // escapeChar is used (e.g. '%:' with escapeChar: '%').
       const regexMetachars = '^$.*+?()[]{}|\\';
       if (!regexMetachars.includes(nextChar)) {
-        // Not a regex metachar: treat the backslash as a literal character,
-        // advance past it so the next character is processed normally.
+        // Not a regex metachar: treat the escape char as a literal character
+        // and advance past it so the next character is processed normally.
+        // Use `options.escapeChar` (not a hardcoded `\`) so this works when
+        // the user has customized the escape char.
         segments.push({
           type: 'literal',
-          name: '\\',
-          regex: '\\\\',
+          name: options.escapeChar,
+          regex: escapeRegex(options.escapeChar),
           optional: inOptional,
           optionalGroupId: inOptional ? optionalGroupId : undefined
         });
@@ -293,6 +297,48 @@ const isAbsentValue = (val) => {
   if (typeof val === 'number' && Number.isNaN(val)) return true;
   if (Array.isArray(val) && val.length === 0) return true;
   return false;
+};
+
+/**
+ * Returns the value to use for the (occurrenceIndex)-th segment with the
+ * given name, plus a flag indicating whether the caller should `join('/')`
+ * the value before emitting it.
+ *
+ * Behaviour depends on `totalOccurrences` and the type of `values[name]`:
+ *
+ * - Non-array: returned as-is with `joinWithSlash: false`. Used for every
+ *   occurrence, preserving the pre-fix behaviour.
+ * - Array + `totalOccurrences === 1`: the array is returned with
+ *   `joinWithSlash: true`. The caller joins with `/` before emitting. This
+ *   is the documented "single segment with an array value" path — it
+ *   applies to BOTH optional and required segments, even though the joined
+ *   result may not round-trip through `match` (the default value charset
+ *   does not include `/`). The asymmetry is intentional: arrays are a
+ *   convenient way to build a multi-segment path segment-by-segment, and
+ *   the caller knows what they are doing. Repeated values for a single
+ *   segment are joined just like optional-segment arrays.
+ * - Array + `totalOccurrences > 1`: the same name appears in multiple
+ *   segments, so element `occurrenceIndex` is returned with
+ *   `joinWithSlash: false`. If the index is past the end of the array, the
+ *   last element is used as a fallback. This lets `/api/:ids/posts/:ids`
+ *   correctly distribute `{ids: ['1', '2']}` across the two `:ids`
+ *   captures (Bug 4 fix) instead of repeating the joined string for both
+ *   positions.
+ * @param {Object} values - User-provided values map
+ * @param {string} name - Segment name to look up
+ * @param {number} occurrenceIndex - Zero-based index of this segment among
+ *   segments with the same name
+ * @param {number} totalOccurrences - Total number of segments with this name
+ * @returns {{ value: *, joinWithSlash: boolean }} The value and a flag
+ */
+const valueForOccurrence = (values, name, occurrenceIndex, totalOccurrences) => {
+  const val = values[name];
+  if (!Array.isArray(val)) return { value: val, joinWithSlash: false };
+  if (totalOccurrences === 1) return { value: val, joinWithSlash: true };
+  const element = occurrenceIndex < val.length
+    ? val[occurrenceIndex]
+    : val[val.length - 1];
+  return { value: element, joinWithSlash: false };
 };
 
 /**
@@ -518,77 +564,189 @@ const stringify = (compiled, values = {}) => {
     throw new Error('Cannot stringify a pattern created from regex');
   }
 
+  // `Object.keys(values)` would throw on null; coerce to {} so the function
+  // is robust against `stringify(null)` calls.
+  const safeValues = values && typeof values === 'object' ? values : {};
+
   let result = '';
   let i = 0;
-  
+
+  const wildcardName = compiled.options.wildcardName;
+
+  // Pre-count how many segments share each name. We need this to decide
+  // how to interpret an array value: a single segment with the name joins
+  // the array with `/` (documented optional-segment behaviour, see
+  // "bug fix 10" / "bug fix 11" in the test suite); a name that appears
+  // in multiple segments distributes element-by-element (Bug 4 fix).
+  const nameTotalCounts = Object.create(null);
+  for (const seg of compiled.segments) {
+    if (seg.type === 'named') {
+      nameTotalCounts[seg.name] = (nameTotalCounts[seg.name] || 0) + 1;
+    } else if (seg.type === 'wildcard') {
+      nameTotalCounts[wildcardName] = (nameTotalCounts[wildcardName] || 0) + 1;
+    }
+  }
+
+  // Track how many times we've seen each segment name while walking the
+  // segments. Combined with `nameTotalCounts`, this is what lets a pattern
+  // like '/api/:ids/posts/:ids' distribute `{ids: ['1', '2']}` across the
+  // two `:ids` captures.
+  const nameOccurrence = Object.create(null);
+
+  // Whether the user provided any values at all. Drives the "wipe literal-
+  // only optional groups" decision (Bug 2): there is no value the user
+  // can pass to "opt in" to a literal-only group, so when no values are
+  // provided the minimal URL is generated.
+  const hasAnyValue = Object.keys(safeValues).length > 0;
+
   while (i < compiled.segments.length) {
     const segment = compiled.segments[i];
-    
+
     if (segment.optional) {
       let optionalPart = '';
-      let j = i;
+      let groupWiped = false;
       const currentGroupId = segment.optionalGroupId;
 
-      while (j < compiled.segments.length && compiled.segments[j].optional && compiled.segments[j].optionalGroupId === currentGroupId) {
+      // Find the end of this optional group up front, so we can always
+      // skip the whole group atomically — even when the inner loop breaks
+      // early because a value in the middle of the group is missing.
+      // Without this, a missing middle value would leave the trailing
+      // segments of the same group to be emitted separately, producing
+      // a URL that does not round-trip with `match` (Bug 3 fix).
+      let groupEnd = i;
+      while (groupEnd < compiled.segments.length
+             && compiled.segments[groupEnd].optional
+             && compiled.segments[groupEnd].optionalGroupId === currentGroupId) {
+        groupEnd++;
+      }
+
+      let j = i;
+      while (j < groupEnd) {
         const seg = compiled.segments[j];
 
         if (seg.type === 'literal') {
+          // A literal-only optional group has no named/wildcard to drive
+          // the inclusion decision. Wipe the group when no values were
+          // provided at all (so the minimal URL is generated) and include
+          // the literal otherwise.
+          if (!hasAnyValue) {
+            groupWiped = true;
+            break;
+          }
           optionalPart += seg.name;
         } else if (seg.type === 'named') {
-          const val = values[seg.name];
-          if (isAbsentValue(val)) {
-            optionalPart = '';
+          const nameCount = nameOccurrence[seg.name] || 0;
+          const { value, joinWithSlash } = valueForOccurrence(
+            safeValues, seg.name, nameCount, nameTotalCounts[seg.name] || 0
+          );
+          nameOccurrence[seg.name] = nameCount + 1;
+          // For the single-segment case, valueForOccurrence returns the
+          // raw array; join it with `/` to honour the documented
+          // "non-empty array on optional segment is still joined with `/`"
+          // behaviour. The joined result is then checked for emptiness so
+          // a value like [''] or [null] wipes the group instead of
+          // leaving a dangling separator (Bug 1 fix).
+          const emitted = joinWithSlash ? value.join('/') : value;
+          if (isAbsentValue(emitted)) {
+            groupWiped = true;
             break;
           }
-          optionalPart += Array.isArray(val) ? val.join('/') : val;
+          optionalPart += emitted;
         } else if (seg.type === 'wildcard') {
-          const val = values[compiled.options.wildcardName];
-          // Wildcards inside an optional group still consume values[wildcardName]
-          // when present; if absent, the whole group is wiped.
-          if (isAbsentValue(val)) {
-            optionalPart = '';
+          const nameCount = nameOccurrence[wildcardName] || 0;
+          const { value, joinWithSlash } = valueForOccurrence(
+            safeValues, wildcardName, nameCount, nameTotalCounts[wildcardName] || 0
+          );
+          nameOccurrence[wildcardName] = nameCount + 1;
+          // Same rule as for named: single wildcard joins with `/`,
+          // repeated wildcards distribute element-by-element.
+          const emitted = joinWithSlash ? value.join('/') : value;
+          if (isAbsentValue(emitted)) {
+            groupWiped = true;
             break;
           }
-          optionalPart += Array.isArray(val) ? val.join('/') : val;
+          optionalPart += emitted;
         }
 
         j++;
       }
 
-      if (optionalPart !== '') {
+      if (!groupWiped && optionalPart !== '') {
         result += optionalPart;
       }
 
-      if (i === j) {
-        i++;
-      } else {
-        i = j;
-      }
+      // Always advance past the entire group, whether it was included or
+      // wiped. This is the fix for the partial-wipe asymmetry (Bug 3).
+      i = groupEnd;
       continue;
     }
 
     if (segment.type === 'literal') {
       result += segment.name;
     } else if (segment.type === 'named') {
-      const value = values[segment.name];
+      const nameCount = nameOccurrence[segment.name] || 0;
+      const { value, joinWithSlash } = valueForOccurrence(
+        safeValues, segment.name, nameCount, nameTotalCounts[segment.name] || 0
+      );
+      nameOccurrence[segment.name] = nameCount + 1;
       if (isAbsentValue(value)) {
         throw new Error(`Missing required value for segment: ${segment.name}`);
       }
-      result += Array.isArray(value) ? value.join('/') : value;
+      // Same handling as optional segments: a single required segment
+      // with an array value joins the array with `/`. This matches the
+      // documented optional-segment behaviour and keeps a consistent
+      // interpretation of arrays across required and optional positions.
+      // The resulting URL may not round-trip through `match` (the default
+      // value charset does not include `/`) — that is the same
+      // documented asymmetry that exists for optional segments.
+      result += joinWithSlash ? value.join('/') : value;
     } else if (segment.type === 'wildcard') {
-      const value = values[compiled.options.wildcardName];
-      // Empty string is a valid wildcard match result (e.g. '/files/*' on '/files/')
-      // and should be allowed without throwing.
+      const nameCount = nameOccurrence[wildcardName] || 0;
+      const { value, joinWithSlash } = valueForOccurrence(
+        safeValues, wildcardName, nameCount, nameTotalCounts[wildcardName] || 0
+      );
+      nameOccurrence[wildcardName] = nameCount + 1;
+      // Empty string is a valid wildcard match result (e.g. '/files/*' on
+      // '/files/') and should be allowed without throwing.
       if (value === undefined || value === null) {
         throw new Error('Missing required wildcard value');
       }
-      result += Array.isArray(value) ? value.join('/') : value;
+      // Same handling as optional wildcards: a single required wildcard
+      // with an array value joins the array with `/`. See the named
+      // comment above for the rationale.
+      result += joinWithSlash ? value.join('/') : value;
     }
-    
+
     i++;
   }
 
   return result;
+};
+
+/**
+ * Recursively freezes an object and all of its non-RegExp children.
+ *
+ * `Object.freeze` is shallow — freezing `pattern.compiled` does not freeze
+ * `pattern.compiled.segments` or any of the segment objects inside it, so
+ * mutating them does not throw in strict mode and silently desyncs the
+ * cached regex. This helper walks the structure and freezes every nested
+ * object/array so the contract documented on `pattern.compiled` ("any
+ * attempt to mutate it will throw in strict mode") actually holds.
+ *
+ * RegExp instances are skipped: freezing a RegExp makes its `lastIndex`
+ * non-writable, which would break the match function.
+ * @param {*} obj - Value to freeze in place
+ * @param {WeakSet} [seen] - Already-visited objects (cycle protection)
+ */
+const deepFreeze = (obj, seen = new WeakSet()) => {
+  if (obj === null || typeof obj !== 'object' || seen.has(obj)) return;
+  if (Object.isFrozen(obj)) return;
+  if (obj instanceof RegExp) return;
+  seen.add(obj);
+  Object.freeze(obj);
+  for (const key of Object.keys(obj)) {
+    deepFreeze(obj[key], seen);
+  }
 };
 
 /**
@@ -608,12 +766,14 @@ class UrlPattern {
       /** @type {CompiledPattern} */
       this.compiled = makePattern(pattern, /** @type {UrlPatternOptions} */ (options));
     }
-    // The compiled state is exposed as a read-only introspection field; freeze
-    // it (and the nested `options` object) so accidental mutation fails loudly
-    // instead of silently desynchronising the cached regex. `Object.freeze`
-    // is shallow, so we explicitly freeze `options` too.
-    Object.freeze(this.compiled.options);
-    Object.freeze(this.compiled);
+    // The compiled state is exposed as a read-only introspection field. Freeze
+    // it deeply so accidental mutation throws in strict mode instead of
+    // silently desynchronising the cached regex. `Object.freeze` is shallow, so
+    // `deepFreeze` walks `segments`, `segmentNames`, `options`, and any other
+    // nested objects/arrays. `regexObj` is a RegExp and is intentionally
+    // skipped — freezing it would make `lastIndex` non-writable and break
+    // `match`.
+    deepFreeze(this.compiled);
   }
 
   /**
