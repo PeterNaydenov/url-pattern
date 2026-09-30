@@ -47,11 +47,11 @@
   },
   "devDependencies": {
     "@rollup/plugin-terser": "^1.0.0",
-    "@vitest/coverage-v8": "^5.0.1",
+    "@vitest/coverage-v8": "^5.0.2",
     "oxlint": "^1.82.0",
     "rollup": "^4.63.1",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.2"
   },
   "allowScripts": {
     "fsevents@2.3.3": true
